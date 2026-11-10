@@ -33,8 +33,8 @@ LibreTV Next.js 迁移版：免费在线视频聚合搜索与观看平台。基�
 
 ```bash
 # 访问密码为可选项：设置 .env 中的 PASSWORD 即开启密码验证；
-# 不设置则免登录（公开访问），适合内网/自用部署
-echo "PASSWORD=your-password" > .env
+# 不设置（或 .env 留空）则免登录（公开访问），适合内网/自用部署
+echo "PASSWORD=your-password" > .env      # 想要免登录就跳过这一行
 
 # 方式一：拉取发布镜像（零构建）
 docker compose pull && docker compose up -d
@@ -54,12 +54,12 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - PASSWORD=change-me   # 必填：访问密码，务必修改
+      - PASSWORD=${PASSWORD:-}   # 可选：设置了即开启密码验证；留空/不设则免登录
       # - PROXY_SECRET=your-secret          # 会话/代理签名密钥，多实例部署建议设置
       # - DEFAULT_SOURCES=[{"name":"示例源","url":"https://example.com/api.php/provide/vod"}]
       # - DEFAULT_LIVE_SOURCES=[{"name":"示例直播源","url":"https://example.com/list.m3u"}]
       # - DEFAULT_SUBSCRIPTIONS=["https://example.com/sources.json"]  # 预置订阅，自动导入点播源+直播源
-      # - DEFAULT_RECOMMEND_SOURCE=douban  # 首页推荐数据源默认值（douban/bangumi/hot-list），仅对未主动选择过的用户生效
+      # - DEFAULT_RECOMMEND_SOURCE=douban  # 首页推荐默认值（douban/bangumi/hot-list）；custom 在设置面板里配
       # - LIVE_ALLOW_PRIVATE=1              # 自建内网 IPTV 源时开启
 ```
 

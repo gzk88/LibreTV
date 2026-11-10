@@ -12,8 +12,9 @@ services:
       - "8080:8080"
     # 无状态服务：观看历史在浏览器 IndexedDB、设置在 localStorage，无需挂载卷
     environment:
-      # 必填：访问密码（在 .env 中设置，缺失时 compose 启动即报错提醒）
-      - PASSWORD=${PASSWORD:?请在 .env 中设置 PASSWORD}
+      # 可选：访问密码。设置了就开启密码验证；不设置（或留空）则免登录直接进入
+      # 对外网暴露时建议在 .env 中设置 PASSWORD=xxx
+      - PASSWORD=${PASSWORD:-}
       # 可选：会话/代理签名密钥（多实例部署建议显式设置：openssl rand -hex 32）
       # - PROXY_SECRET=your-secret
       # 可选：Cookie Secure 策略覆盖（true=强制开启 / false=强制关闭；不设置时按请求协议自动推导，HTTP 部署无需配置）
@@ -26,6 +27,7 @@ services:
       # refreshDays 为该订阅的静默刷新周期初始值（1-365 天，缺省 1 天），可省略；用户在面板改过后以面板为准
       # - DEFAULT_SUBSCRIPTIONS=["https://example.com/sources.json", {"url":"https://example.com/list.json","name":"名称","refreshDays":10}]
       # 可选：首页推荐数据源默认值（douban / bangumi / hot-list），仅对未主动选择过的用户生效
+      # 注意：custom（自定义推荐）是浏览器端配置，在设置面板里填 JSON 接口地址或上传本地 JSON，不通过环境变量下发
       # - DEFAULT_RECOMMEND_SOURCE=douban
       # 可选：自建内网 IPTV 放行（对拉列表、测活、拉流三个阶段同时生效，默认关闭以维持 SSRF 防护）
       # - LIVE_ALLOW_PRIVATE=1
