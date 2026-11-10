@@ -2,8 +2,11 @@
 FROM node:22-alpine AS builder
 WORKDIR /app
 
+# npm 源，默认国内镜像；需要官方源可 docker compose build --build-arg NPM_REGISTRY=https://registry.npmjs.org
+ARG NPM_REGISTRY=https://registry.npmmirror.com
 COPY package.json package-lock.json* ./
-RUN npm ci --no-audit --no-fund
+RUN npm config set registry "$NPM_REGISTRY" \
+ && npm ci --no-audit --no-fund --fetch-retries=5 --fetch-retry-maxtimeout=120000
 
 COPY . .
 ENV DOCKER_BUILD=1
