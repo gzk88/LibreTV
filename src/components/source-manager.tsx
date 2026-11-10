@@ -31,6 +31,7 @@ import { useAuth } from './auth';
 import { api } from '@/lib/client-api';
 import { AUTO_REFRESH_MAX_FAIL_STREAK, syncSourceSubscription } from '@/lib/subscription-sync';
 import { describeParseStats } from '@/lib/tvbox-parser';
+import { normalizeCustomRecommendPayload } from '@/lib/custom-recommend-parse';
 
 /**
  * 设置抽屉：顶部两级导航。
@@ -749,17 +750,195 @@ function HomePanel() {
         <SelectRow
           label="推荐数据源"
           value={store.recommendSource}
-          onChange={(v) => store.updateSettings({ recommendSource: v as 'douban' | 'bangumi' | 'hot-list' })}
+          onChange={(v) =>
+            store.updateSettings({
+              recommendSource: v as 'douban' | 'bangumi' | 'hot-list' | 'custom',
+            })
+          }
           options={[
             { value: 'douban', label: '豆瓣', hint: '热门电影与剧集' },
             { value: 'bangumi', label: 'Bangumi', hint: '每日新番放送（免 key）' },
             { value: 'hot-list', label: '影视榜单', hint: '豆瓣周榜 / 百度热播' },
+            { value: 'custom', label: '自定义', hint: 'JSON 接口或本地文件' },
           ]}
         />
+      </div>
+
+      {store.recommendSource === 'custom' && <CustomRecommendSettings />}
+
+      <div className="mt-6">
+        <CustomCategoriesEditor />
       </div>
     </section>
   );
 }
+
+/**
+ * 自定义推荐源设置：接口地址（服务端代理拉取，规避 CORS）+ 本地 JSON 文件上传。
+ * 两者都有时优先展示本地上传的条目（离线可用、不受接口挂掉影响），
+ * 所以上传后给出明确的「当前生效」提示，避免用户以为地址没生效。
+ */
+function CustomRecommendSettings() {
+  const url = useAppStore((s) => s.customRecommendUrl);
+  const items = useAppStore((s) => s.customRecommendItems);
+  const updateSettings = useAppStore((s) => s.updateSettings);
+  const { toast } = useToast();
+  const [draft, setDraft] = useState(url);
+
+  // 外部值变化（如配置导入）时同步回显
+  useEffect(() => setDraft(url), [url]);
+
+  // 防抖写 store：避免每敲一个字符就整份设置落盘
+  useEffect(() => {
+    if (draft === url) return;
+    const timer = setTimeout(() => updateSettings({ customRecommendUrl: draft.trim() }), 300);
+    return () => clearTimeout(timer);
+  }, [draft, url, updateSettings]);
+
+  const upload = async (file: File) => {
+    try {
+      const text = await file.text();
+      let raw: unknown;
+      try {
+        raw = JSON.parse(text);
+      } catch {
+        throw new Error('文件不是合法 JSON');
+      }
+      const parsed = normalizeCustomRecommendPayload(raw);
+      if (parsed.length === 0) throw new Error('没有解析到条目（每条至少需要 title 字段）');
+      updateSettings({
+        customRecommendItems: parsed.map(({ title, cover, rating }) => ({ title, cover, rating })),
+      });
+      toast(`已导入 ${parsed.length} 条本地推荐数据`, 'success');
+    } catch (err) {
+      toast(err instanceof Error ? err.message : '导入失败', 'error');
+    }
+  };
+
+  return (
+    <div className="mt-3 space-y-2 rounded-lg border border-line bg-chip/40 p-3">
+      <input
+        className="input w-full"
+        aria-label="自定义推荐 JSON 接口地址"
+        placeholder="JSON 接口地址，返回 {items:[{title,cover}]} 或数组"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+      />
+      <div className="flex items-center gap-2 flex-wrap">
+        <label className="btn-primary text-xs cursor-pointer">
+          上传本地 JSON 文件
+          <input
+            type="file"
+            accept=".json,application/json"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void upload(f);
+              e.target.value = '';
+            }}
+          />
+        </label>
+        <span className="text-xs text-faint">也可上传本地 JSON 作为推荐数据源</span>
+      </div>
+      {items.length > 0 && (
+        <div className="flex items-center justify-between gap-2 text-xs">
+          <span className="text-success">
+            已上传 {items.length} 条本地数据（优先展示，清空后回退到接口地址）
+          </span>
+          <button
+            className="text-muted hover:text-danger transition-colors shrink-0"
+            onClick={() => {
+              updateSettings({ customRecommendItems: [] });
+              toast('已清空本地推荐数据', 'info');
+            }}
+          >
+            清空
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 自定义分类与小标签：分类名即首页胶囊文案，标签全是搜索词（逗号分隔）。
+ * 编辑即时写 store；输入框用本地态 + 防抖，避免逐字符触发首页重渲染。
+ */
+function CustomCategoriesEditor() {
+  const categories = useAppStore((s) => s.customCategories);
+  const { addCustomCategory, updateCustomCategory, removeCustomCategory } = useAppStore();
+
+  return (
+    <section>
+      <SectionTitle
+        title="自定义分类与小标签"
+        hint="首页按分类展示小标签，点击小标签即按该词搜索"
+        extra={
+          <button className="btn-primary text-xs shrink-0" onClick={() => addCustomCategory()}>
+            <Icon name="plus" className="w-3.5 h-3.5" /> 添加分类
+          </button>
+        }
+      />
+      {categories.length === 0 ? (
+        <p className="text-xs text-faint leading-relaxed">
+          还没有自定义分类。点「添加分类」新建一个，再填入用逗号分隔的搜索词（如
+          <span className="text-muted">星际穿越,盗梦空间,沙丘</span>），它们会以胶囊形式出现在首页推荐区。
+        </p>
+      ) : (
+        <ul className="space-y-2">
+          {categories.map((c) => (
+            <li key={c.id} className="rounded-lg border border-line bg-chip/40 p-2.5 space-y-2">
+              <div className="flex items-center gap-2">
+                <input
+                  className="input flex-1 min-w-0 !py-1.5 text-xs"
+                  aria-label="分类名称"
+                  placeholder="分类名称"
+                  value={c.name}
+                  maxLength={20}
+                  onChange={(e) => updateCustomCategory(c.id, { name: e.target.value })}
+                />
+                <Switch
+                  checked={c.enabled}
+                  onChange={(v) => updateCustomCategory(c.id, { enabled: v })}
+                  label={`启用分类 ${c.name}`}
+                  title="关闭后不在首页展示，配置保留"
+                />
+                <button
+                  className="rounded-md p-2 shrink-0 text-muted transition-colors hover:bg-hover hover:text-danger"
+                  aria-label="删除分类"
+                  title="删除该分类"
+                  onClick={() => removeCustomCategory(c.id)}
+                >
+                  <Icon name="trash" className="w-4 h-4" />
+                </button>
+              </div>
+              <input
+                className="input w-full !py-1.5 text-xs"
+                aria-label="小标签搜索词"
+                placeholder="小标签（搜索词），用逗号分隔，如：星际穿越,盗梦空间,沙丘"
+                value={c.tags.join(',')}
+                onChange={(e) =>
+                  updateCustomCategory(c.id, {
+                    // 逗号（中英文）与顿号都当分隔符，顺手去掉空白与重复
+                    tags: Array.from(
+                      new Set(
+                        e.target.value
+                          .split(/[,，、]/)
+                          .map((t) => t.trim())
+                          .filter(Boolean)
+                      )
+                    ),
+                  })
+                }
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 
 // —— 数据面板 ——
 

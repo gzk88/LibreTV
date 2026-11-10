@@ -125,8 +125,10 @@ export interface BangumiCalendarResponse {
 }
 
 export interface AuthStatusResponse {
-  /** 服务器是否配置了 PASSWORD */
+  /** 服务器是否配置了 PASSWORD（false = 免登录模式） */
   passwordRequired: boolean;
+  /** 免登录模式下恒为 true；已配置密码时取决于会话 cookie */
+  authDisabled?: boolean;
   /** 当前会话是否已验证 */
   verified: boolean;
   version: string;

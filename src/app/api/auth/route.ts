@@ -3,11 +3,33 @@ import { SESSION_COOKIE, checkRateLimit, sessionFromCookieHeader, signSession, c
 
 export const runtime = 'nodejs';
 
+/** 统一写会话 cookie：Secure 标记按 COOKIE_SECURE / x-forwarded-proto 推导 */
+function attachSessionCookie(req: Request, res: NextResponse, token: string, maxAge: number): NextResponse {
+  // 不能依赖 req.url——Next.js Route Handler 中它是内部转发地址，并非用户侧的原始协议。
+  const secure = process.env.COOKIE_SECURE === 'true'
+    ? true
+    : process.env.COOKIE_SECURE === 'false'
+      ? false
+      : (req.headers.get('x-forwarded-proto')?.split(',')[0]?.trim() ?? 'http') === 'https';
+  res.cookies.set(SESSION_COOKIE, token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure,
+    maxAge,
+    path: '/',
+  });
+  return res;
+}
+
 export async function POST(req: Request) {
+  // 免登录模式：未设置 PASSWORD 时无需校验，直接下发会话（保持前端登录流程的兼容）
   if (!isPasswordConfigured()) {
-    return NextResponse.json(
-      { success: false, error: '服务器未设置 PASSWORD 环境变量，请联系管理员配置' },
-      { status: 503 }
+    const { token, expiresAt } = signSession();
+    return attachSessionCookie(
+      req,
+      NextResponse.json({ success: true, authDisabled: true }),
+      token,
+      Math.floor((expiresAt - Date.now()) / 1000)
     );
   }
 
@@ -33,28 +55,18 @@ export async function POST(req: Request) {
 
   clearRateLimit(ip);
   const { token, expiresAt } = signSession();
-  const res = NextResponse.json({ success: true });
-  // Cookie Secure 策略：COOKIE_SECURE 环境变量显式覆盖；否则按 x-forwarded-proto 推导。
-  // 不能依赖 req.url——Next.js Route Handler 中它是内部转发地址，并非用户侧的原始协议。
-  const secure = process.env.COOKIE_SECURE === 'true'
-    ? true
-    : process.env.COOKIE_SECURE === 'false'
-      ? false
-      : (req.headers.get('x-forwarded-proto')?.split(',')[0]?.trim() ?? 'http') === 'https';
-  res.cookies.set(SESSION_COOKIE, token, {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure,
-    maxAge: Math.floor((expiresAt - Date.now()) / 1000),
-    path: '/',
-  });
-  return res;
+  return attachSessionCookie(
+    req,
+    NextResponse.json({ success: true }),
+    token,
+    Math.floor((expiresAt - Date.now()) / 1000)
+  );
 }
 
-/** GET：查询当前会话状态 */
+/** GET：查询当前会话状态（免登录模式下恒定已通过） */
 export async function GET(req: Request) {
-  const verified = sessionFromCookieHeader(req.headers.get('cookie'));
-  return NextResponse.json({ success: true, verified });
+  const verified = !isPasswordConfigured() || sessionFromCookieHeader(req.headers.get('cookie'));
+  return NextResponse.json({ success: true, verified, authDisabled: !isPasswordConfigured() });
 }
 
 /** DELETE：登出 */

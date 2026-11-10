@@ -1,18 +1,19 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/client-api';
 import { useAppStore } from '@/lib/store';
 import { cn } from '@/lib/utils';
 import type { DoubanItem } from '@/lib/types';
 import { DoubanCard } from './video-card';
+import { Icon } from './icon';
 
 const MOVIE_TAGS = ['热门', '最新', '经典', '豆瓣高分', '冷门佳片', '华语', '欧美', '韩国', '日本', '动画'];
 const TV_TAGS = ['热门', '美剧', '英剧', '韩剧', '日剧', '国产剧', '港剧', '日本动画', '综艺', '纪录片'];
 const WEEKDAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
-/** 首页推荐区：数据源由设置决定（豆瓣热门 / Bangumi 新番放送 / 影视热榜），二选一展示 */
+/** 首页推荐区：数据源由设置决定（豆瓣热门 / Bangumi 新番放送 / 影视热榜 / 自定义），单选展示 */
 export function RecommendSection({ onPick }: { onPick: (title: string) => void }) {
   const doubanEnabled = useAppStore((s) => s.doubanEnabled);
   const recommendSource = useAppStore((s) => s.recommendSource);
@@ -20,6 +21,7 @@ export function RecommendSection({ onPick }: { onPick: (title: string) => void }
   if (!doubanEnabled) return null;
   if (recommendSource === 'bangumi') return <BangumiView onPick={onPick} />;
   if (recommendSource === 'hot-list') return <HotListView onPick={onPick} />;
+  if (recommendSource === 'custom') return <CustomView onPick={onPick} />;
   return <DoubanView onPick={onPick} />;
 }
 
@@ -74,6 +76,7 @@ function DoubanView({ onPick }: { onPick: (title: string) => void }) {
             {t}
           </button>
         ))}
+        <CustomCategoryChips onPick={onPick} />
       </div>
 
       {query.isError ? (
@@ -120,6 +123,7 @@ function BangumiView({ onPick }: { onPick: (title: string) => void }) {
             {name}
           </ChipButton>
         ))}
+        <CustomCategoryChips onPick={onPick} />
       </div>
 
       {query.isError ? (
@@ -165,6 +169,7 @@ function HotListView({ onPick }: { onPick: (title: string) => void }) {
             {l.label}
           </ChipButton>
         ))}
+        <CustomCategoryChips onPick={onPick} />
       </div>
 
       {query.isError ? (
@@ -181,6 +186,123 @@ function HotListView({ onPick }: { onPick: (title: string) => void }) {
     </section>
   );
 }
+
+/**
+ * 自定义推荐：本地上传的 JSON 优先，其次走设置里填的接口地址（服务端代理拉取）。
+ * 都没配时给出配置指引，而不是一片空白——用户此刻正需要知道去哪儿填。
+ */
+function CustomView({ onPick }: { onPick: (title: string) => void }) {
+  const url = useAppStore((s) => s.customRecommendUrl);
+  const localItems = useAppStore((s) => s.customRecommendItems);
+  const hasLocal = localItems.length > 0;
+
+  const query = useQuery({
+    queryKey: ['custom-recommend', url],
+    queryFn: ({ signal }) => api.customRecommend(url, signal),
+    enabled: !hasLocal && Boolean(url.trim()),
+  });
+
+  const items: DoubanItem[] = hasLocal ? localItems.map((item, i) => ({ id: `local-${i}`, ...item })) : (query.data?.items ?? []);
+  const unconfigured = !hasLocal && !url.trim();
+
+  return (
+    <section aria-label="自定义推荐">
+      <div className="flex flex-wrap gap-1.5 mb-4">
+        <CustomCategoryChips onPick={onPick} />
+      </div>
+
+      {unconfigured ? (
+        <p className="text-center text-sm text-faint py-8 leading-relaxed">
+          尚未配置自定义推荐源。到「设置 → 偏好设置 → 首页与内容 → 推荐数据源」选择<span className="text-content">自定义</span>，
+          填入 JSON 接口地址或上传本地 JSON 文件（需含 <code className="text-accent text-xs">title</code> 字段）。
+        </p>
+      ) : query.isError && !hasLocal ? (
+        <p className="text-center text-sm text-faint py-8">
+          自定义推荐加载失败：{(query.error as Error)?.message || '请检查接口地址'}
+        </p>
+      ) : query.isLoading && !hasLocal ? (
+        <GridSkeleton />
+      ) : items.length === 0 ? (
+        <p className="text-center text-sm text-faint py-8">该推荐源暂无内容</p>
+      ) : (
+        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2.5">
+          {items.map((item) => (
+            <DoubanCard key={item.id} item={item} onClick={() => onPick(item.title)} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/**
+ * 自定义分类胶囊：追加在推荐区胶囊行末尾。
+ * 点分类名展开小标签，点小标签直接按该词搜索；无标签的分类不展示（点开也没东西可点）。
+ */
+function CustomCategoryChips({ onPick }: { onPick: (title: string) => void }) {
+  const categories = useAppStore((s) => s.customCategories);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  // 点空白处收起；点胶囊本身由按钮自己切换
+  useEffect(() => {
+    if (!openId) return;
+    const handler = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpenId(null);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [openId]);
+
+  const visible = categories.filter((c) => c.enabled && c.tags.length > 0);
+  if (visible.length === 0) return null;
+
+  return (
+    <div ref={rootRef} className="flex flex-wrap items-center gap-1.5">
+      {visible.map((c) => {
+        const open = openId === c.id;
+        return (
+          <div key={c.id} className="relative">
+            <button
+              className={cn(
+                'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs transition-colors',
+                open ? 'bg-accent text-on-accent' : 'bg-chip text-muted hover:text-content hover:bg-hover'
+              )}
+              aria-expanded={open}
+              aria-label={`${c.name}，展开小标签`}
+              onClick={() => setOpenId(open ? null : c.id)}
+            >
+              {c.name}
+              <Icon name="chevronDown" className={cn('w-3 h-3 transition-transform', open && 'rotate-180')} />
+            </button>
+            {open && (
+              <div
+                className="absolute left-0 top-full mt-1 z-30 min-w-[6rem] rounded-lg border border-line bg-surface-raised shadow-xl p-1 flex flex-col"
+                role="menu"
+                aria-label={`${c.name} 的小标签`}
+              >
+                {c.tags.map((tag) => (
+                  <button
+                    key={tag}
+                    role="menuitem"
+                    className="text-left text-xs whitespace-nowrap px-2 py-1.5 rounded-md text-muted hover:text-content hover:bg-hover transition-colors"
+                    onClick={() => {
+                      setOpenId(null);
+                      onPick(tag);
+                    }}
+                  >
+                    {tag}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 
 function GridSkeleton() {
   return (

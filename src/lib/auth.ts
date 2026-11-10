@@ -20,6 +20,16 @@ export function isPasswordConfigured(): boolean {
   return getPassword().length > 0;
 }
 
+/**
+ * 是否开启「免登录」模式：未设置 PASSWORD 即视为公开站点。
+ *
+ * 旧行为是未配置密码时整站不可用（接口一律 503 + 前端弹「需要配置密码」），
+ * 这对自用/内网部署太苛刻；现在改为可选：设了密码就校验，不设就直接放行。
+ */
+export function isAuthDisabled(): boolean {
+  return !isPasswordConfigured();
+}
+
 function getSecret(): string {
   if (process.env.PROXY_SECRET) return process.env.PROXY_SECRET;
   return crypto.createHash('sha256').update(getPassword() + ':libretv::session-salt').digest('hex');

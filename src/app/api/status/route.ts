@@ -8,13 +8,16 @@ import { getEnvImageMode } from '@/lib/env-image-mode';
 
 export const runtime = 'nodejs';
 
-/** 站点状态：客户端据此决定是否弹出登录框 / 提示管理员配置密码，并获取预置采集站与预置直播源 */
+/** 站点状态：客户端据此决定是否弹出登录框，并获取预置采集站与预置直播源 */
 export async function GET(req: Request) {
+  // PASSWORD 为可选项：未配置即免登录，verified 恒为 true
   const passwordRequired = isPasswordConfigured();
-  const verified = passwordRequired && sessionFromCookieHeader(req.headers.get('cookie'));
+  const verified = !passwordRequired || sessionFromCookieHeader(req.headers.get('cookie'));
   return NextResponse.json({
     passwordRequired,
     verified,
+    // 免登录模式，前端据此隐藏登录相关提示
+    authDisabled: !passwordRequired,
     // 构建时由 next.config.ts 从 package.json 注入
     version: process.env.APP_VERSION || 'dev',
     // 部署者通过 DEFAULT_SOURCES 预置的采集站

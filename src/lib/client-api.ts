@@ -210,6 +210,12 @@ export const api = {
     return request<DoubanResponse>(`/api/hot-list?${sp.toString()}`, { signal });
   },
 
+  /** 自定义推荐源：服务端代理拉取用户填写的 JSON 接口（规避目标站 CORS） */
+  customRecommend: (url: string, signal?: AbortSignal) => {
+    const sp = new URLSearchParams({ url });
+    return request<DoubanResponse>(`/api/recommend/custom?${sp.toString()}`, { signal });
+  },
+
   /** 换源：按标题跨源搜索并取详情，附带接口耗时（测速）；支持 signal 以便关闭弹窗时中止在途请求 */
   detailSpeed: async (id: string, source: SourceConfig, signal?: AbortSignal) => {
     const start = performance.now();

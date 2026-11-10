@@ -18,7 +18,7 @@ type SetupRequired = boolean;
 interface AuthContextValue {
   checked: boolean;
   verified: boolean;
-  /** 服务器未设置 PASSWORD，需要管理员配置 */
+  /** 服务器未设置 PASSWORD（旧版会要求管理员配置；现在为免登录模式，恒为 false） */
   setupRequired: SetupRequired;
   /** /api/status 返回的应用版本（构建时从 package.json 注入） */
   version: string | null;
@@ -56,7 +56,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then((s) => {
         if (cancelled) return;
         setVerified(s.verified);
-        setSetupRequired(!s.passwordRequired);
+        // PASSWORD 可选：未设置时服务端返回 verified=true（免登录），
+        // 因此不再出现「需要配置密码」这种阻断态。
+        setSetupRequired(false);
         setVersion(s.version);
         setChecked(true);
       })

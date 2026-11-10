@@ -13,16 +13,46 @@ import { PERSIST_KEY, createThrottledStorage } from './persist-storage';
  * 旧版把 10+ 个零散 localStorage key 当作跨页面状态总线，这里统一为单一 store。
  */
 
+/**
+ * 首页推荐数据源：
+ * - douban / bangumi / hot-list：内置三种；custom：用户自填（JSON 接口地址或本地 JSON 文件）
+ */
+export type RecommendSource = 'douban' | 'bangumi' | 'hot-list' | 'custom';
+
+/** 自定义推荐条目：只保留展示与搜索所需字段（封面可直连/走代理） */
+export interface CustomRecommendItem {
+  title: string;
+  cover: string;
+  rating?: string;
+}
+
+/**
+ * 自定义分类：首页推荐胶囊行末尾展示的分类胶囊。
+ * 胶囊本身不直接搜索，点开后列出小标签，点小标签即按该词搜索（tags 全是搜索词）。
+ */
+export interface CustomCategory {
+  id: string;
+  name: string;
+  /** 关闭后不在首页展示，配置保留 */
+  enabled: boolean;
+  tags: string[];
+}
+
 export interface AppSettings {
   customAPIs: SourceConfig[];
   selectedKeys: string[];
   yellowFilter: boolean;
   adFilter: boolean;
   doubanEnabled: boolean;
-  /** 首页推荐数据源：豆瓣热门 / Bangumi 每日放送（免 key）/ 影视热榜（60s API） */
-  recommendSource: 'douban' | 'bangumi' | 'hot-list';
+  recommendSource: RecommendSource;
   /** 用户是否在设置中主动选择过推荐数据源；为 false 时部署者的 DEFAULT_RECOMMEND_SOURCE 默认值可生效 */
   recommendSourceTouched: boolean;
+  /** 自定义推荐数据源：JSON 接口地址（服务端拉取，规避 CORS） */
+  customRecommendUrl: string;
+  /** 自定义推荐数据源：本地 JSON 文件解析后的条目（有值时优先于接口地址） */
+  customRecommendItems: CustomRecommendItem[];
+  /** 首页推荐区末尾的自定义分类胶囊 */
+  customCategories: CustomCategory[];
   autoplayNext: boolean;
   /** 跳过片段：按归一化剧名持久化，详见 lib/skip-marks.ts */
   skipMarks: Record<string, SkipMark>;
@@ -291,6 +321,11 @@ interface AppState extends AppSettings {
   /** 清除全部跳过片段（设置面板的「清除全部」入口） */
   clearAllSkipMarks: () => void;
   markEnvSubsSeen: (urls: string[]) => void;
+  /** 新增一个自定义分类（默认名「新分类」、启用、无标签），返回新 id */
+  addCustomCategory: () => string;
+  /** 更新自定义分类的名称 / 启用状态 / 标签 */
+  updateCustomCategory: (id: string, patch: Partial<Omit<CustomCategory, 'id'>>) => void;
+  removeCustomCategory: (id: string) => void;
   updateSettings: (patch: Partial<Omit<AppSettings, 'customAPIs' | 'selectedKeys'>>) => void;
 }
 
@@ -334,6 +369,9 @@ export const useAppStore = create<AppState>()(
       doubanEnabled: true,
       recommendSource: 'hot-list',
       recommendSourceTouched: false,
+      customRecommendUrl: '',
+      customRecommendItems: [],
+      customCategories: [],
       autoplayNext: true,
       skipMarks: {},
       // 自动跳过默认开启，但只有用户真正标记过片段才生效
@@ -813,6 +851,30 @@ export const useAppStore = create<AppState>()(
 
       clearAllSkipMarks: () => set({ skipMarks: {} }),
 
+      addCustomCategory: () => {
+        const list = get().customCategories;
+        const id = `cat_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+        set({
+          customCategories: [
+            ...list,
+            { id, name: '新分类', enabled: true, tags: [] },
+          ],
+        });
+        return id;
+      },
+
+      updateCustomCategory: (id, patch) => {
+        const list = get().customCategories;
+        if (!list.some((c) => c.id === id)) return;
+        set({ customCategories: list.map((c) => (c.id === id ? { ...c, ...patch } : c)) });
+      },
+
+      removeCustomCategory: (id) => {
+        const list = get().customCategories;
+        if (!list.some((c) => c.id === id)) return;
+        set({ customCategories: list.filter((c) => c.id !== id) });
+      },
+
       updateSettings: (patch) => {
         // 用户主动修改推荐数据源 / 封面图加载方式时打上「已选择」标记：此后部署者的
         // DEFAULT_RECOMMEND_SOURCE / DEFAULT_IMAGE_MODE 默认值不再覆盖该用户的选择
@@ -854,11 +916,26 @@ export const useAppStore = create<AppState>()(
       // v8：订阅新增 refreshDays / failStreak——两者都缺省即「纯手动 + 无失败记录」，
       //     与旧行为完全一致，因此无需改写存量数据，仅借版本号让 migrate 跑一遍。
       // 此前未声明 version 的存量数据会被视为 v0 并走 migrate 补齐。
-      version: 8,
+      // v9：新增自定义推荐源（接口地址 + 本地 JSON 条目）与自定义分类；
+      //     旧快照缺字段时补默认值，行为与升级前完全一致。
+      version: 9,
       migrate: (persisted, version) => {
         const state = { ...((persisted ?? {}) as Partial<AppState>) };
         if (!Array.isArray(state.liveRecent)) state.liveRecent = [];
         if (!Array.isArray(state.liveSubscriptions)) state.liveSubscriptions = [];
+
+        // 自定义推荐源 / 自定义分类：缺失或类型不对时回到空态
+        if (typeof state.customRecommendUrl !== 'string') state.customRecommendUrl = '';
+        if (!Array.isArray(state.customRecommendItems)) state.customRecommendItems = [];
+        if (!Array.isArray(state.customCategories)) state.customCategories = [];
+        state.customCategories = state.customCategories
+          .filter((c): c is CustomCategory => Boolean(c && typeof c.id === 'string'))
+          .map((c) => ({
+            id: c.id,
+            name: typeof c.name === 'string' && c.name ? c.name : '新分类',
+            enabled: c.enabled !== false,
+            tags: Array.isArray(c.tags) ? c.tags.filter((t): t is string => typeof t === 'string' && t.trim() !== '') : [],
+          }));
 
         // v3 的片头/片尾双标记 → v4 的 segments（纯函数，脏数据在内部丢弃）
         state.skipMarks = migrateSkipMarks(
@@ -931,6 +1008,9 @@ export const useAppStore = create<AppState>()(
         doubanEnabled: s.doubanEnabled,
         recommendSource: s.recommendSource,
         recommendSourceTouched: s.recommendSourceTouched,
+        customRecommendUrl: s.customRecommendUrl,
+        customRecommendItems: s.customRecommendItems,
+        customCategories: s.customCategories,
         autoplayNext: s.autoplayNext,
         skipMarks: s.skipMarks,
         autoSkipSegments: s.autoSkipSegments,

@@ -193,13 +193,14 @@ describe('POST /api/search', () => {
     expect(await fresh.json()).toEqual({ list: [], failures: [] });
   });
 
-  it('未登录返回 401，未配置密码返回 503', async () => {
+  it('未配置密码时免登录放行，已配置密码但未登录返回 401', async () => {
     vi.stubGlobal('fetch', vi.fn());
     const saved = process.env.PASSWORD;
     delete process.env.PASSWORD;
     try {
+      // PASSWORD 为可选项：不设置即免登录，守卫不再拦截（旧版这里返回 503）
       const noPassword = await POST(makeRequest({ wd: 'x', sources: SOURCES }));
-      expect(noPassword.status).toBe(503);
+      expect(noPassword.status).toBe(200);
     } finally {
       process.env.PASSWORD = saved;
     }
