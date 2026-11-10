@@ -1,11 +1,12 @@
 services:
   libretv:
+    # 默认用本地构建的镜像（libretv:local），确保跑的是本仓库源码，而不是上游发布镜像
+    # 想改用发布镜像：LIBRETV_IMAGE=ghcr.io/librespark/libretv:latest（那是上游代码，不含本仓库改动）
+    # 想固定版本：LIBRETV_IMAGE=ghcr.io/librespark/libretv:<版本>
+    image: ${LIBRETV_IMAGE:-libretv:local}
     build: .
-    # 版本管理：镜像 tag 与 package.json 的 version 保持一致
-    # - 使用者：不设置 LIBRETV_IMAGE 即拉取 ghcr.io/librespark/libretv:latest（首次部署用 docker compose pull）
-    # - 开发者：docker compose up -d --build 会在本地构建并打上同名 tag
-    # - 需要固定版本时设置 LIBRETV_IMAGE=ghcr.io/librespark/libretv:<版本>
-    image: ${LIBRETV_IMAGE:-ghcr.io/librespark/libretv:latest}
+    # 始终本地构建：避免同名 tag 已存在于本机时 compose 直接复用旧镜像、跳过构建
+    pull_policy: build
     container_name: libretv
     restart: unless-stopped
     ports:

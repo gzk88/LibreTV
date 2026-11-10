@@ -36,19 +36,23 @@ LibreTV Next.js 迁移版：免费在线视频聚合搜索与观看平台。基�
 # 不设置（或 .env 留空）则免登录（公开访问），适合内网/自用部署
 echo "PASSWORD=your-password" > .env      # 想要免登录就跳过这一行
 
-# 方式一：拉取发布镜像（零构建）
-docker compose pull && docker compose up -d
-
-# 方式二：源码构建
+# 构建本地镜像并启动（跑的是本仓库源码，镜像 tag 为 libretv:local）
 docker compose up -d --build
+
+# 核对版本：应与 package.json 的 version 一致（页脚显示 v2.22.0 说明跑的是上游官方镜像）
+curl http://localhost:8080/api/status
 ```
+
+> 不要直接 `docker compose pull` 拉 `ghcr.io/librespark/libretv:latest`——那是上游官方镜像，仍是「必须配置 PASSWORD」的旧逻辑，用它会出现「需要配置密码」的 503 提示页。想拉发布镜像时请显式指定 `LIBRETV_IMAGE`。
 
 ### Docker Compose
 
 ```yaml
 services:
   libretv:
-    image: ghcr.io/librespark/libretv:latest
+    image: libretv:local      # 本地构建的镜像（跑本仓库源码）
+    build: .
+    pull_policy: build        # 始终构建，避免复用已有的同名旧镜像
     container_name: libretv
     restart: unless-stopped
     ports:
@@ -66,7 +70,7 @@ services:
 > 其余可选变量见下方[环境变量](#环境变量)表；仓库内的 `docker-compose.yml` 含完整注释版本（含 `build: .` 源码构建分支）。
 
 ```bash
-docker compose pull && docker compose up -d
+docker compose up -d --build
 ```
 
 > ⚠️ **生产部署必须通过 HTTPS 访问**（localhost 除外）：生产模式下会话 cookie 带 `Secure` 标记，浏览器只在 HTTPS（或 localhost）下保存它。因此用 `http://服务器IP:端口` 访问时，会出现"密码正确却无法登录"的现象——登录请求实际成功，但 cookie 被浏览器丢弃。请通过反向代理（Nginx / Caddy / Traefik）或 Cloudflare 等为站点套上 TLS 后再对外提供服务；本地开发用 `localhost` 不受影响。
@@ -75,6 +79,9 @@ docker compose pull && docker compose up -d
 （`latest` / `主.次` / 完整版本号三个 tag，`linux/amd64` 与 `linux/arm64` 双架构，
 两个 registry 的镜像 digest 一致）。需要固定版本时在 `.env` 中设置
 `LIBRETV_IMAGE=ghcr.io/librespark/libretv:<版本>`。
+
+> 注意：上述发布镜像由上游仓库（LibreSpark/LibreTV）的 CI 构建，内容不含本 fork 的改动
+> （密码可选、自定义推荐源、自定义分类小标签）。要跑到这些新功能，请用 `docker compose up -d --build` 本地构建。
 
 > 版本号以 `package.json` 为单一来源，部署后可用 `/api/status` 返回的 `version` 字段核对。详见[部署文档](https://libretv.is-an.org/wiki/Deployment.html)。
 
