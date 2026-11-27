@@ -27,6 +27,16 @@ export interface CustomRecommendItem {
 }
 
 /**
+ * 自定义推荐源里带分类时的单个分类（上传本地 JSON 后按分类渲染首页胶囊）。
+ * 条目只存展示所需字段，与 CustomRecommendItem 一致。
+ */
+export interface CustomRecommendCategory {
+  id: string;
+  name: string;
+  items: CustomRecommendItem[];
+}
+
+/**
  * 自定义分类：首页推荐胶囊行末尾展示的分类胶囊。
  * 胶囊本身不直接搜索，点开后列出小标签，点小标签即按该词搜索（tags 全是搜索词）。
  */
@@ -51,6 +61,8 @@ export interface AppSettings {
   customRecommendUrl: string;
   /** 自定义推荐数据源：本地 JSON 文件解析后的条目（有值时优先于接口地址） */
   customRecommendItems: CustomRecommendItem[];
+  /** 自定义推荐数据源：本地 JSON 里的分类（非空时首页按分类渲染胶囊，优先于上面的扁平条目） */
+  customRecommendCategories: CustomRecommendCategory[];
   /** 首页推荐区末尾的自定义分类胶囊 */
   customCategories: CustomCategory[];
   autoplayNext: boolean;
@@ -371,6 +383,7 @@ export const useAppStore = create<AppState>()(
       recommendSourceTouched: false,
       customRecommendUrl: '',
       customRecommendItems: [],
+      customRecommendCategories: [],
       customCategories: [],
       autoplayNext: true,
       skipMarks: {},
@@ -918,7 +931,8 @@ export const useAppStore = create<AppState>()(
       // 此前未声明 version 的存量数据会被视为 v0 并走 migrate 补齐。
       // v9：新增自定义推荐源（接口地址 + 本地 JSON 条目）与自定义分类；
       //     旧快照缺字段时补默认值，行为与升级前完全一致。
-      version: 9,
+      // v10：自定义推荐源支持 JSON 自带分类（categories），首页据此渲染分类胶囊。
+      version: 10,
       migrate: (persisted, version) => {
         const state = { ...((persisted ?? {}) as Partial<AppState>) };
         if (!Array.isArray(state.liveRecent)) state.liveRecent = [];
@@ -927,6 +941,19 @@ export const useAppStore = create<AppState>()(
         // 自定义推荐源 / 自定义分类：缺失或类型不对时回到空态
         if (typeof state.customRecommendUrl !== 'string') state.customRecommendUrl = '';
         if (!Array.isArray(state.customRecommendItems)) state.customRecommendItems = [];
+        if (!Array.isArray(state.customRecommendCategories)) state.customRecommendCategories = [];
+        state.customRecommendCategories = state.customRecommendCategories
+          .filter((c): c is CustomRecommendCategory => Boolean(c && typeof c.id === 'string'))
+          .map((c) => ({
+            id: c.id,
+            name: typeof c.name === 'string' && c.name ? c.name : '未命名分类',
+            items: Array.isArray(c.items)
+              ? c.items
+                  .filter((it) => it && typeof it.title === 'string' && it.title.trim() !== '')
+                  .map((it) => ({ title: it.title, cover: typeof it.cover === 'string' ? it.cover : '', rating: it.rating }))
+              : [],
+          }))
+          .filter((c) => c.items.length > 0);
         if (!Array.isArray(state.customCategories)) state.customCategories = [];
         state.customCategories = state.customCategories
           .filter((c): c is CustomCategory => Boolean(c && typeof c.id === 'string'))
@@ -1010,6 +1037,7 @@ export const useAppStore = create<AppState>()(
         recommendSourceTouched: s.recommendSourceTouched,
         customRecommendUrl: s.customRecommendUrl,
         customRecommendItems: s.customRecommendItems,
+        customRecommendCategories: s.customRecommendCategories,
         customCategories: s.customCategories,
         autoplayNext: s.autoplayNext,
         skipMarks: s.skipMarks,

@@ -83,6 +83,28 @@ docker compose up -d --build
 > 注意：上述发布镜像由上游仓库（LibreSpark/LibreTV）的 CI 构建，内容不含本 fork 的改动
 > （密码可选、自定义推荐源、自定义分类小标签）。要跑到这些新功能，请用 `docker compose up -d --build` 本地构建。
 
+#### 自定义推荐源 JSON 格式（本 fork）
+
+设置 → 偏好设置 → 首页与内容 → 推荐数据源选「自定义」后，可填 JSON 接口地址或上传本地 JSON 文件。两种写法都接受：
+
+```jsonc
+// ① 扁平：一条数据源就是一面墙
+{ "items": [{ "title": "无声的回响", "cover": "https://img/a.webp", "rating": "8.2" }] }
+
+// ② 带分类：首页会像「荐片」那样渲染一排分类胶囊，点胶囊切换下面的卡片
+{
+  "categories": [
+    { "id": "home", "name": "首页", "items": [ /* 同上 */ ] },
+    { "id": "1", "name": "电影", "items": [ /* ... */ ] }
+  ]
+}
+```
+
+- 单条必填 `title`，选填 `cover` 与 `rating`（也认 `score` / `vote_average` / `rate` / `douban_score`）；同名片按标题去重，每个分类最多保留 200 条
+- 分类里 `name` 必填（胶囊文案），`id` 可省略（自动生成）；`items` 也认 `list` / `data` / `results` / `videos`
+- 接口写法同理，服务端会带上 `?tid=<分类 id>` 重新请求，`/api/recommend/custom` 返回 `{ categories, items }`
+- 本地导入的分类存在浏览器设置里，优先于接口地址；分类胶囊行末尾还会追加「自定义分类」的小标签胶囊
+
 > 版本号以 `package.json` 为单一来源，部署后可用 `/api/status` 返回的 `version` 字段核对。详见[部署文档](https://libretv.is-an.org/wiki/Deployment.html)。
 
 ### 免 Docker 运行（预构建包）

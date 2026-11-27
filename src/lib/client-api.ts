@@ -1,6 +1,6 @@
 'use client';
 
-import type { SearchResponse, SearchStreamEvent, SourceSearchOutcome, VideoDetail, DoubanResponse, BangumiCalendarResponse, AuthStatusResponse, SourceConfig, SearchResultItem, LivePlaylistResponse, LiveEpgResponse, SourceListPayload, QualityProbeItem, QualityProbeResult } from './types';
+import type { SearchResponse, SearchStreamEvent, SourceSearchOutcome, VideoDetail, DoubanResponse, CustomRecommendResponse, BangumiCalendarResponse, AuthStatusResponse, SourceConfig, SearchResultItem, LivePlaylistResponse, LiveEpgResponse, SourceListPayload, QualityProbeItem, QualityProbeResult } from './types';
 
 /**
  * 客户端 API 封装。401 时触发全局事件打开登录框，
@@ -211,9 +211,10 @@ export const api = {
   },
 
   /** 自定义推荐源：服务端代理拉取用户填写的 JSON 接口（规避目标站 CORS） */
-  customRecommend: (url: string, signal?: AbortSignal) => {
+  customRecommend: (url: string, tid: string, signal?: AbortSignal) => {
     const sp = new URLSearchParams({ url });
-    return request<DoubanResponse>(`/api/recommend/custom?${sp.toString()}`, { signal });
+    if (tid) sp.set('tid', tid);
+    return request<CustomRecommendResponse>(`/api/recommend/custom?${sp.toString()}`, { signal });
   },
 
   /** 换源：按标题跨源搜索并取详情，附带接口耗时（测速）；支持 signal 以便关闭弹窗时中止在途请求 */

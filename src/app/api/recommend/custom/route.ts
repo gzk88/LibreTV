@@ -14,6 +14,7 @@ export async function GET(req: Request) {
   if (guarded) return guarded;
 
   const url = new URL(req.url).searchParams.get('url')?.trim() || '';
+  const tid = new URL(req.url).searchParams.get('tid')?.trim() || '';
   if (!url) {
     return NextResponse.json({ error: '缺少 url 参数' }, { status: 400 });
   }
@@ -22,8 +23,8 @@ export async function GET(req: Request) {
   }
 
   try {
-    const items = await fetchCustomRecommend(url);
-    return NextResponse.json({ items });
+    const { items, categories } = await fetchCustomRecommend(url, tid);
+    return NextResponse.json({ items, categories });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : '自定义推荐源获取失败' },

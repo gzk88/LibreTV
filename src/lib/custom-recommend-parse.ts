@@ -10,6 +10,8 @@ import type { DoubanItem } from './types';
  * 支持的数据形状（尽量宽容，用户手上的数据多半是各处导出的）：
  * - 裸数组：`[{ "title": "...", "cover": "..." }]`
  * - 带 items 的对象：`{ "items": [...] }`（也兼容 list / data / results / subjects / videos）
+ * - 带分类的对象：`{ "categories": [{ "id": "home", "name": "首页", "items": [...] }, ...] }`
+ *   分类模式会额外返回分类列表，首页照「荐片」那样渲染一排分类胶囊，点分类切换下面的卡片。
  *
  * 单条只需 `title`（必填）与 `cover`（选填），评分字段 `rating|score|vote_average|rate` 均可。
  */
@@ -70,4 +72,72 @@ export function normalizeCustomRecommendPayload(raw: unknown): DoubanItem[] {
     if (items.length >= MAX_CUSTOM_ITEMS) break;
   }
   return items;
+}
+
+/** 分类键：一个分类里放一组条目，name 即胶囊文案 */
+const CATEGORY_KEYS = ['categories', 'cats', 'sections', 'channels', 'groups'];
+/** 分类内部条目数组的键 */
+const CATEGORY_ITEM_KEYS = ['items', 'list', 'data', 'results', 'videos', 'movies', 'subjects'];
+
+export interface ParsedCustomCategory {
+  id: string;
+  name: string;
+  items: DoubanItem[];
+}
+
+export interface ParsedCustomRecommend {
+  /** 分类列表；没有分类数据时为空数组（此时按扁平 items 展示） */
+  categories: ParsedCustomCategory[];
+  /** 顶层扁平条目；没有时回退成第一个分类的条目 */
+  items: DoubanItem[];
+}
+
+/**
+ * 解析自定义推荐 JSON，同时兼容「扁平条目」与「带分类」两种写法。
+ * 服务端拉取与客户端上传都走这里，保证两边看到的分类/条目完全一致。
+ *
+ * 分类模式下每个分类单独套用 200 条上限；分类名缺失的直接跳过（胶囊没文案没法点）。
+ */
+export function parseCustomRecommendPayload(raw: unknown): ParsedCustomRecommend {
+  const flat = normalizeCustomRecommendPayload(raw);
+  const categories: ParsedCustomCategory[] = [];
+
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    const obj = raw as Record<string, unknown>;
+    for (const key of CATEGORY_KEYS) {
+      const list = obj[key];
+      if (!Array.isArray(list)) continue;
+
+      const usedIds = new Set<string>();
+      list.forEach((entry, index) => {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return;
+        const c = entry as Record<string, unknown>;
+        const name = pickString(c, ['name', 'title', 'label', 'category', 'channel']);
+        if (!name) return;
+
+        let rows: unknown[] | null = null;
+        for (const itemKey of CATEGORY_ITEM_KEYS) {
+          const v = c[itemKey];
+          if (Array.isArray(v)) {
+            rows = v;
+            break;
+          }
+        }
+        if (!rows) return;
+
+        const items = normalizeCustomRecommendPayload(rows);
+        if (items.length === 0) return;
+
+        let id = pickString(c, ['id', 'key', 'slug', 'code']) || `cat-${index}`;
+        if (usedIds.has(id)) id = `${id}-${index}`;
+        usedIds.add(id);
+        categories.push({ id, name, items });
+      });
+
+      // 命中一个分类键就不再找别的（避免 sections/channels 混用导致重复）
+      if (categories.length > 0) break;
+    }
+  }
+
+  return { categories, items: flat.length > 0 ? flat : (categories[0]?.items ?? []) };
 }

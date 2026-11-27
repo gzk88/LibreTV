@@ -114,6 +114,17 @@ export interface DoubanResponse {
   items: DoubanItem[];
 }
 
+/** 自定义推荐源：JSON 里带 categories 时下发分类元信息，前端渲染分类胶囊 */
+export interface CustomRecommendCategoryMeta {
+  id: string;
+  name: string;
+  count?: number;
+}
+
+export interface CustomRecommendResponse extends DoubanResponse {
+  categories?: CustomRecommendCategoryMeta[];
+}
+
 export interface BangumiCalendarDay {
   /** 1=周一 … 7=周日 */
   weekday: number;

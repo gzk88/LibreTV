@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/client-api';
 import { useAppStore } from '@/lib/store';
 import { cn } from '@/lib/utils';
-import type { DoubanItem } from '@/lib/types';
+import type { CustomRecommendCategoryMeta, DoubanItem } from '@/lib/types';
 import { DoubanCard } from './video-card';
 import { Icon } from './icon';
 
@@ -194,27 +194,60 @@ function HotListView({ onPick }: { onPick: (title: string) => void }) {
 function CustomView({ onPick }: { onPick: (title: string) => void }) {
   const url = useAppStore((s) => s.customRecommendUrl);
   const localItems = useAppStore((s) => s.customRecommendItems);
-  const hasLocal = localItems.length > 0;
+  const localCategories = useAppStore((s) => s.customRecommendCategories);
+  const hasLocal = localItems.length > 0 || localCategories.length > 0;
+  const [tid, setTid] = useState('');
 
   const query = useQuery({
-    queryKey: ['custom-recommend', url],
-    queryFn: ({ signal }) => api.customRecommend(url, signal),
+    queryKey: ['custom-recommend', url, tid],
+    queryFn: ({ signal }) => api.customRecommend(url, tid, signal),
     enabled: !hasLocal && Boolean(url.trim()),
   });
 
-  const items: DoubanItem[] = hasLocal ? localItems.map((item, i) => ({ id: `local-${i}`, ...item })) : (query.data?.items ?? []);
+  // 接口模式下分类元信息单独留住一份：切分类会换 queryKey，data 短暂为空时胶囊不能消失
+  const [remoteCategories, setRemoteCategories] = useState<CustomRecommendCategoryMeta[]>([]);
+  useEffect(() => setRemoteCategories([]), [url]);
+  useEffect(() => {
+    const cats = query.data?.categories;
+    if (cats && cats.length > 0) setRemoteCategories(cats);
+  }, [query.data]);
+
+  // 本地导入优先：JSON 里带 categories 就按分类渲染胶囊，否则沿用扁平条目
+  const categories: CustomRecommendCategoryMeta[] = hasLocal
+    ? localCategories.map((c) => ({ id: c.id, name: c.name, count: c.items.length }))
+    : remoteCategories;
+  const activeTid = tid || categories[0]?.id || '';
+
+  let items: DoubanItem[];
+  if (hasLocal) {
+    if (localCategories.length > 0) {
+      const cat = localCategories.find((c) => c.id === activeTid) ?? localCategories[0];
+      items = cat.items.map((item, i) => ({ id: `local-${cat.id}-${i}`, ...item }));
+    } else {
+      items = localItems.map((item, i) => ({ id: `local-${i}`, ...item }));
+    }
+  } else {
+    items = query.data?.items ?? [];
+  }
+
   const unconfigured = !hasLocal && !url.trim();
 
   return (
     <section aria-label="自定义推荐">
-      <div className="flex flex-wrap gap-1.5 mb-4">
+      <div className="flex flex-wrap items-center gap-1.5 mb-4">
+        {categories.map((c) => (
+          <ChipButton key={c.id} active={c.id === activeTid} onClick={() => setTid(c.id)}>
+            {c.name}
+          </ChipButton>
+        ))}
         <CustomCategoryChips onPick={onPick} />
       </div>
 
       {unconfigured ? (
         <p className="text-center text-sm text-faint py-8 leading-relaxed">
           尚未配置自定义推荐源。到「设置 → 偏好设置 → 首页与内容 → 推荐数据源」选择<span className="text-content">自定义</span>，
-          填入 JSON 接口地址或上传本地 JSON 文件（需含 <code className="text-accent text-xs">title</code> 字段）。
+          填入 JSON 接口地址或上传本地 JSON 文件（需含 <code className="text-accent text-xs">title</code> 字段，
+          带 <code className="text-accent text-xs">categories</code> 时首页会按分类展示胶囊）。
         </p>
       ) : query.isError && !hasLocal ? (
         <p className="text-center text-sm text-faint py-8">
@@ -235,10 +268,6 @@ function CustomView({ onPick }: { onPick: (title: string) => void }) {
   );
 }
 
-/**
- * 自定义分类胶囊：追加在推荐区胶囊行末尾。
- * 点分类名展开小标签，点小标签直接按该词搜索；无标签的分类不展示（点开也没东西可点）。
- */
 function CustomCategoryChips({ onPick }: { onPick: (title: string) => void }) {
   const categories = useAppStore((s) => s.customCategories);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -258,7 +287,7 @@ function CustomCategoryChips({ onPick }: { onPick: (title: string) => void }) {
   if (visible.length === 0) return null;
 
   return (
-    <div ref={rootRef} className="flex flex-wrap items-center gap-1.5">
+    <div ref={rootRef} className="contents">
       {visible.map((c) => {
         const open = openId === c.id;
         return (

@@ -31,7 +31,7 @@ import { useAuth } from './auth';
 import { api } from '@/lib/client-api';
 import { AUTO_REFRESH_MAX_FAIL_STREAK, syncSourceSubscription } from '@/lib/subscription-sync';
 import { describeParseStats } from '@/lib/tvbox-parser';
-import { normalizeCustomRecommendPayload } from '@/lib/custom-recommend-parse';
+import { parseCustomRecommendPayload } from '@/lib/custom-recommend-parse';
 
 /**
  * 设置抽屉：顶部两级导航。
@@ -781,6 +781,7 @@ function HomePanel() {
 function CustomRecommendSettings() {
   const url = useAppStore((s) => s.customRecommendUrl);
   const items = useAppStore((s) => s.customRecommendItems);
+  const categories = useAppStore((s) => s.customRecommendCategories);
   const updateSettings = useAppStore((s) => s.updateSettings);
   const { toast } = useToast();
   const [draft, setDraft] = useState(url);
@@ -804,12 +805,25 @@ function CustomRecommendSettings() {
       } catch {
         throw new Error('文件不是合法 JSON');
       }
-      const parsed = normalizeCustomRecommendPayload(raw);
-      if (parsed.length === 0) throw new Error('没有解析到条目（每条至少需要 title 字段）');
-      updateSettings({
-        customRecommendItems: parsed.map(({ title, cover, rating }) => ({ title, cover, rating })),
-      });
-      toast(`已导入 ${parsed.length} 条本地推荐数据`, 'success');
+      const parsed = parseCustomRecommendPayload(raw);
+      if (parsed.items.length === 0) throw new Error('没有解析到条目（每条至少需要 title 字段）');
+
+      const toStored = (list: typeof parsed.items) => list.map(({ title, cover, rating }) => ({ title, cover, rating }));
+      if (parsed.categories.length > 0) {
+        // 带分类：首页按分类渲染胶囊，扁平条目清空避免重复展示
+        updateSettings({
+          customRecommendCategories: parsed.categories.map((c) => ({ id: c.id, name: c.name, items: toStored(c.items) })),
+          customRecommendItems: [],
+        });
+        const total = parsed.categories.reduce((n, c) => n + c.items.length, 0);
+        toast(`已导入 ${parsed.categories.length} 个分类、共 ${total} 条本地推荐数据`, 'success');
+      } else {
+        updateSettings({
+          customRecommendItems: toStored(parsed.items),
+          customRecommendCategories: [],
+        });
+        toast(`已导入 ${parsed.items.length} 条本地推荐数据`, 'success');
+      }
     } catch (err) {
       toast(err instanceof Error ? err.message : '导入失败', 'error');
     }
@@ -820,7 +834,7 @@ function CustomRecommendSettings() {
       <input
         className="input w-full"
         aria-label="自定义推荐 JSON 接口地址"
-        placeholder="JSON 接口地址，返回 {items:[{title,cover}]} 或数组"
+        placeholder="JSON 接口地址，返回 {items:[{title,cover}]} 或数组，也可返回 {categories:[{name,items}]}"
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
       />
@@ -840,15 +854,18 @@ function CustomRecommendSettings() {
         </label>
         <span className="text-xs text-faint">也可上传本地 JSON 作为推荐数据源</span>
       </div>
-      {items.length > 0 && (
+      {(items.length > 0 || categories.length > 0) && (
         <div className="flex items-center justify-between gap-2 text-xs">
           <span className="text-success">
-            已上传 {items.length} 条本地数据（优先展示，清空后回退到接口地址）
+            {categories.length > 0
+              ? `已导入 ${categories.length} 个分类（${categories.map((c) => c.name).join(' / ')}），首页按分类展示`
+              : `已上传 ${items.length} 条本地数据`}
+            （优先展示，清空后回退到接口地址）
           </span>
           <button
             className="text-muted hover:text-danger transition-colors shrink-0"
             onClick={() => {
-              updateSettings({ customRecommendItems: [] });
+              updateSettings({ customRecommendItems: [], customRecommendCategories: [] });
               toast('已清空本地推荐数据', 'info');
             }}
           >
